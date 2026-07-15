@@ -122,6 +122,51 @@ describe("parallel task runner", () => {
     assert.ok(events.indexOf("start:independent") < events.indexOf("end:base"));
   });
 
+  it("waits for onComplete while treating resolved result values as opaque", async () => {
+    const events: string[] = [];
+    const dependencyCompletion = Promise.withResolvers<void>();
+
+    const running = runParallelTasks([
+      { id: "failed-check" },
+      { id: "independent" },
+      { id: "cleanup", dependsOn: ["failed-check"] }
+    ], {
+      concurrency: 2,
+      execute: async (task) => {
+        events.push(`execute:${task.id}`);
+        if (task.id === "independent") {
+          await waitFor(() => events.includes("complete:failed-check:start"));
+        }
+        return { id: task.id, ok: task.id !== "failed-check" };
+      },
+      onComplete: async (_result, task) => {
+        if (task.id === "failed-check") {
+          events.push("complete:failed-check:start");
+          await dependencyCompletion.promise;
+          events.push("complete:failed-check:end");
+          return;
+        }
+        events.push(`complete:${task.id}`);
+      }
+    });
+
+    await waitFor(() => events.includes("complete:independent"));
+    await delay(1);
+    const cleanupStartedBeforeDependencyCompleted = events.includes("execute:cleanup");
+    dependencyCompletion.resolve();
+
+    const results = await running;
+    assert.equal(cleanupStartedBeforeDependencyCompleted, false);
+    assert.deepEqual(taskById(results, "failed-check"), {
+      id: "failed-check",
+      ok: false
+    });
+    assert.deepEqual(taskById(results, "cleanup"), {
+      id: "cleanup",
+      ok: true
+    });
+  });
+
   it("expands nested task groups with inherited metadata and group dependencies", async () => {
     const tasks = expandTasks([
       { id: "setup", run: () => "setup" },

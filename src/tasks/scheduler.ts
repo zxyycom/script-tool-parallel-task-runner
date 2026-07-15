@@ -145,8 +145,10 @@ function startTask<TResult>({
     .then(() => execute(task))
     .then((result) => {
       results.push(result);
-      completedIds.add(task.id);
       return onComplete(result, task);
+    })
+    .then(() => {
+      completedIds.add(task.id);
     })
     .catch(onError)
     .finally(() => {
